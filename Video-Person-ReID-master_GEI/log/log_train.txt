@@ -1,0 +1,5 @@
+==========
+Args:Namespace(arch='resnet50tp', dataset='mars', eval_step=50, evaluate=False, gamma=0.1, gpu_devices='0', height=224, htri_only=False, lr=0.0003, margin=0.3, max_epoch=400, num_instances=4, pool='avg', pretrained_model='/home/jiyang/Workspace/Works/video-person-reid/3dconv-person-reid/pretrained_models/resnet-50-kinetics.pth', print_freq=80, save_dir='log', seed=1, seq_len=4, start_epoch=0, stepsize=200, test_batch=1, train_batch=32, use_cpu=False, weight_decay=0.0005, width=112, workers=4)
+==========
+Currently using GPU 0
+Initializing dataset mars
