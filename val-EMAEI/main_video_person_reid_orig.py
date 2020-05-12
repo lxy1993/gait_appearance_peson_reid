@@ -1,3 +1,4 @@
+#-*- coding: utf-8 -*-
 from __future__ import print_function, absolute_import
 import os
 import sys
@@ -6,6 +7,8 @@ import datetime
 import argparse
 import os.path as osp
 import numpy as np
+import psutil
+import logging
 
 import torch
 import torch.nn as nn
@@ -13,7 +16,6 @@ import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
 from torch.optim import lr_scheduler
-from tensorboardX import  SummaryWriter
 
 import data_manager
 from video_loader import VideoDataset
@@ -37,11 +39,11 @@ parser.add_argument('--width', type=int, default=112,
                     help="width of an image (default: 112)")
 parser.add_argument('--seq-len', type=int, default=4, help="number of images to sample in a tracklet")
 # Optimization options
-parser.add_argument('--max-epoch', default=100, type=int,
+parser.add_argument('--max-epoch', default=400, type=int,
                     help="maximum epochs to run")
 parser.add_argument('--start-epoch', default=0, type=int,
                     help="manual epoch number (useful on restarts)")
-parser.add_argument('--train-batch', default=16, type=int,
+parser.add_argument('--train-batch', default=32, type=int,
                     help="train batch size")
 parser.add_argument('--test-batch', default=1, type=int, help="has to be 1")
 parser.add_argument('--lr', '--learning-rate', default=0.0003, type=float,
@@ -62,6 +64,7 @@ parser.add_argument('-a', '--arch', type=str, default='resnet50tp',
                     help="resnet503d, resnet50tp, resnet50ta, resnetrnn")
 parser.add_argument('--pool', type=str, default='avg', choices=['avg', 'max'])
 
+
 # Miscs
 parser.add_argument('--print-freq', type=int, default=80, help="print frequency")
 parser.add_argument('--seed', type=int, default=1, help="manual seed")
@@ -73,18 +76,23 @@ parser.add_argument('--eval-step', type=int, default=50,
                     help="run evaluation for every N epochs (set to -1 to test after training)")
 parser.add_argument('--save-dir', type=str, default='log')
 parser.add_argument('--use-cpu', action='store_true', help="use cpu")
-parser.add_argument('--gpu-devices', default='0', type=str, help='gpu device ids for CUDA_VISIBLE_DEVICES')
+parser.add_argument('--gpu-devices', default='1', type=str, help='gpu device ids for CUDA_VISIBLE_DEVICES')
 
 args = parser.parse_args()
 
 
 def main():
-    file_name = "result_cl_v4.5.txt"
+    file_name = "result_cl_orig.txt"
     result_file = open(file_name, "w+")
     if result_file:
         print("file exist")
     else:
         os.mkdir(file_name)
+
+    log_filename = "logging.txt"
+    log_format = "%(asctime)s %(message)s"
+    logging.basicConfig(format=log_format, datefmt="%Y-%m-%d %H:%M:%S %p", level=logging.DEBUG, filename=log_filename,
+                        filemode="w")
 
     torch.manual_seed(args.seed)
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_devices
@@ -113,41 +121,20 @@ def main():
         T.ToTensor(),
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
-    transform_val = T.Compose([
-        T.Resize((args.height, args.width)),
-        T.ToTensor(),
-        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
+
     transform_test = T.Compose([
         T.Resize((args.height, args.width)),
         T.ToTensor(),
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
+
+
     pin_memory = True if use_gpu else False
+    # sampler = RandomIdentitySampler(dataset.train, num_instances=args.num_instances)
+    # print(format(sampler))
 
-    GEI_dir = "/media/work401/880AA9210AA90CEE/lxy/2020-03-15/MEAEI_npy"
-    def load_GEI(GEI_dir, loader, batchsize,phase):
-        dir = GEI_dir
-        GEI_list = []
-        GEI_npys = np.zeros((batchsize, 2048))
+    GEI_dir = "/media/work401/880AA9210AA90CEE/lxy/2020-03-15/GEI_npy"
 
-        for batch_idx, (imgs, pids, cids, seq_type) in enumerate(loader):
-            cids = cids.to(torch.int8)
-            for i in range(batchsize):
-                if phase=="trian" or phase =="val":
-                    pid = "%03d" % (pids[i]+1)
-                else:
-                    pid = "%03d" % pids[i]
-                cid = "c" + str(cids[i].item())
-                GEI_name = str(pid) + "-" + seq_type[i] + "-" + str(cid) + ".npy"
-                GEI_name = os.path.join(dir, GEI_name)
-                GEI_file = np.load(GEI_name).reshape(1, -1)
-                GEI_npys[i] = GEI_file
-            GEI_list.append(GEI_npys)
-
-        return GEI_list
-
-###########dataloader 加载数据集###########################
     trainloader = DataLoader(
         VideoDataset(dataset.train, seq_len=args.seq_len, sample='random', transform=transform_train),
         sampler=RandomIdentitySampler(dataset.train, num_instances=args.num_instances),
@@ -155,14 +142,6 @@ def main():
         pin_memory=pin_memory, drop_last=True,
     )
 
-    valloader = DataLoader(
-        VideoDataset(dataset.val, seq_len=args.seq_len, sample='random', transform=transform_val),
-        sampler=RandomIdentitySampler(dataset.val, num_instances=args.num_instances),
-        batch_size=args.train_batch, num_workers=args.workers,
-        pin_memory=pin_memory, drop_last=True,
-    )
-
-    train_all={"train":trainloader,"val":valloader}
 
     queryloader = DataLoader(
         VideoDataset(dataset.query, seq_len=args.seq_len, sample='dense', transform=transform_test),
@@ -170,26 +149,14 @@ def main():
         pin_memory=pin_memory, drop_last=False,
     )
 
+
     galleryloader = DataLoader(
         VideoDataset(dataset.gallery, seq_len=args.seq_len, sample='dense', transform=transform_test),
         batch_size=args.test_batch, shuffle=False, num_workers=args.workers,
         pin_memory=pin_memory, drop_last=False,
     )
 
-    #######trainloader 中包含每个batchsize中轨迹的名称，接下来只要加载对应的GEI img########
-    train_GEI = load_GEI(GEI_dir, trainloader, args.train_batch,"trian")
-    val_GEI = load_GEI(GEI_dir, valloader, args.train_batch,"val")
-    train_GEI_all={"train":train_GEI,"val":val_GEI}
-    print("finished train_GEI and val_GEI###########")
 
-
-    query_GEI = load_GEI(GEI_dir, queryloader, args.test_batch,"query")
-    gallery_GEI = load_GEI(GEI_dir, galleryloader, args.test_batch,"gallery")
-    print("finished query_GEI and gallery_GEI###########")
-
-
-
-    #####################加载模型，置置模型参数######################
     print("Initializing model: {}".format(args.arch))
     if args.arch == 'resnet503d':
         model = resnet3d.resnet50(num_classes=dataset.num_train_pids, sample_width=args.width,
@@ -221,115 +188,75 @@ def main():
     if args.evaluate:
         print("Evaluate only")
         reslut = open("reslut.txt")
-        test(model, queryloader, galleryloader, query_GEI, gallery_GEI, args.pool, use_gpu, reslut)
+        test(model, queryloader, galleryloader, args.pool, use_gpu, reslut)
         return
 
-#############训练、测试模型参数###############################
     start_time = time.time()
     best_rank1 = -np.inf
     if args.arch == 'resnet503d':
         torch.backends.cudnn.benchmark = False
-
-    writer = SummaryWriter()
     for epoch in range(start_epoch, args.max_epoch):
         print("==> Epoch {}/{}".format(epoch + 1, args.max_epoch))
 
-        loss_train,loss_val,acc = train(model, criterion_xent, criterion_htri, optimizer, train_all, train_GEI_all, use_gpu)
-        writer.add_scalars("data_loss", {"train_loss": loss_train.avg, "val_loss": loss_val.avg}, epoch)
-        writer.add_scalars("data_acc", {"train_acc": acc["train"], "val_acc": acc["val"]}, epoch)
+        train(model, criterion_xent, criterion_htri, optimizer, trainloader, use_gpu)
 
-        # if args.stepsize > 0: scheduler.step()
-        #
-        # if args.eval_step > 0 and (epoch + 1) % args.eval_step == 0 or (epoch + 1) == args.max_epoch:
-        #     print("==> Test")
-        #     rank1 = test(model, queryloader, galleryloader, query_GEI, gallery_GEI, args.pool, use_gpu, result_file)
-        #     writer.add_scalar("data/rank1",rank1,epoch)
-        #     is_best = rank1 > best_rank1
-        #     if is_best: best_rank1 = rank1
-        #
-        #     if use_gpu:
-        #         state_dict = model.module.state_dict()
-        #     else:
-        #         state_dict = model.state_dict()
-        #     save_checkpoint({
-        #         'state_dict': state_dict,
-        #         'rank1': rank1,
-        #         'epoch': epoch,
-        #     }, is_best, osp.join(args.save_dir, 'checkpoint_ep' + str(epoch + 1) + '.pth.tar'))
+        if args.stepsize > 0: scheduler.step()
+
+        if args.eval_step > 0 and (epoch + 1) % args.eval_step == 0 or (epoch + 1) == args.max_epoch:
+            print("==> Test")
+            rank1 = test(model, queryloader, galleryloader,  args.pool, use_gpu, result_file)
+            is_best = rank1 > best_rank1
+            if is_best: best_rank1 = rank1
+
+            if use_gpu:
+                state_dict = model.module.state_dict()
+            else:
+                state_dict = model.state_dict()
+            save_checkpoint({
+                'state_dict': state_dict,
+                'rank1': rank1,
+                'epoch': epoch,
+            }, is_best, osp.join(args.save_dir, 'checkpoint_ep' + str(epoch + 1) + '.pth.tar'))
 
     elapsed = round(time.time() - start_time)
     elapsed = str(datetime.timedelta(seconds=elapsed))
-    writer.close()
     print("Finished. Total elapsed time (h:m:s): {}".format(elapsed))
 
 
-def train(model, criterion_xent, criterion_htri, optimizer, trainloader, train_GEI, use_gpu):
+def train(model, criterion_xent, criterion_htri, optimizer, trainloader, use_gpu):
+    model.train()
+    losses = AverageMeter()
 
-    # loss_all ={}
-    losses_train = AverageMeter()
-    losses_val = AverageMeter()
-    acc={}
-    for phase in ["train","val"]:
-        if phase=="train":
-            model.train()
+    for batch_idx, (imgs, pids, camid, seqt_ype) in enumerate(trainloader):
+
+        if use_gpu:
+            imgs, pids = imgs.cuda(), pids.cuda(),
+        imgs, pids = Variable(imgs), Variable(pids).type(torch.LongTensor)
+
+        #####数据和步态能量特征一同输入到网络中训练
+        outputs, features = model(imgs)
+        if args.htri_only:
+            # only use hard triplet loss to train the network
+            loss = criterion_htri(features, pids)
         else:
-            model.eval()
+            # combine hard triplet loss with cross entropy loss
+            xent_loss = criterion_xent(outputs, pids)
+            htri_loss = criterion_htri(features, pids)
+            loss = xent_loss + htri_loss
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        losses.update(loss.data, pids.size(0))
+        # losses.update(loss.data[0] pids.size(0))
 
-        running_corrects=0.0
-        for batch_idx, (imgs, pids, camid, seqt_ype) in enumerate(trainloader[phase]):
-            #####加载同一批次的GEI numpyValueError: too many values to unpack (expected 2) file
-            GEI_features = train_GEI[phase][batch_idx]
-            GEI_features = torch.from_numpy(GEI_features)
-            if use_gpu:
-                imgs, pids, GEI_features = imgs.cuda(), pids.cuda(), GEI_features.cuda()
-            imgs, pids, GEI_features = Variable(imgs), Variable(pids).type(torch.LongTensor), Variable(GEI_features).float()
-
-            #####数据和步态能量特征一同输入到网络中训练
-            if phase=="val":
-                with torch.no_grad():
-                    outputs, features = model(imgs, GEI_features)
-            else:
-                outputs, features = model(imgs, GEI_features)
-
-            if args.htri_only:
-                # only use hard triplet loss to train the network
-                loss = criterion_htri(features, pids)
-            else:
-                # combine hard triplet loss with cross entropy loss
-                xent_loss = criterion_xent(outputs, pids)
-                htri_loss = criterion_htri(features, pids)
-                loss = xent_loss + htri_loss
+        if (batch_idx + 1) % args.print_freq == 0:
+            print("Batch {}/{}\t Loss {:.6f} ({:.6f})".format(batch_idx + 1, len(trainloader), losses.val, losses.avg))
 
 
-
-            _,preds=torch.max(outputs.data,1)
-
-            optimizer.zero_grad()
-            if phase=="train":
-                print("train_loss", loss.data)
-                loss.backward()
-                optimizer.step()
-                losses_train.update(loss.data, pids.size(0))
-                # losses.update(loss.data[0] pids.size(0))
-            else:
-                print("val_loss",loss.data)
-                losses_val .update(loss.data, pids.size(0))
-            running_corrects += float(torch.sum(preds.data.cpu() == pids.data))
-
-        print("running_corrects:",running_corrects)
-        acc[phase]=running_corrects/(len(trainloader[phase])*pids.size(0))
-        print(phase,"######",acc[phase])
-
-    return losses_train, losses_val,acc
-
-
-def test(model, queryloader, galleryloader, query_GEI, gallery_GEI, pool, use_gpu, result_file, ranks=[1, 5, 10, 20]):
+def test(model, queryloader, galleryloader, pool, use_gpu, result_file, ranks=[1, 5, 10, 20]):
     model.eval()
     qf, q_pids, q_camids, q_seq_types = [], [], [], []
     for batch_idx, (imgs, pids, camids, seq_types) in enumerate(queryloader):
-        GEI_q_features = query_GEI[batch_idx]
-        GEI_q_features = torch.from_numpy(GEI_q_features).squeeze().float()
-        # print("pids:\n", pids, "camids:\n", camids, "seq_type:\n", seq_type)
 
         if use_gpu:
             imgs = imgs.cuda()
@@ -345,7 +272,7 @@ def test(model, queryloader, galleryloader, query_GEI, gallery_GEI, pool, use_gp
         features = features.view(n, -1)
         features = torch.mean(features, 0)
         features = features.data.cpu()
-        features = torch.cat((features, GEI_q_features), 0)
+
         qf.append(features)
         q_pids.extend(pids)
         q_camids.extend(camids)
@@ -361,8 +288,6 @@ def test(model, queryloader, galleryloader, query_GEI, gallery_GEI, pool, use_gp
 
     gf, g_pids, g_camids, g_seq_types = [], [], [],[]
     for batch_idx, (imgs, pids, camids, seq_types) in enumerate(galleryloader):
-        GEI_g_features = gallery_GEI[batch_idx]
-        GEI_g_features = torch.from_numpy(GEI_g_features).squeeze().float()
 
         if use_gpu:
             imgs = imgs.cuda()
@@ -378,10 +303,7 @@ def test(model, queryloader, galleryloader, query_GEI, gallery_GEI, pool, use_gp
         else:
             features, _ = torch.max(features, 0)
 
-        # print("features.size #########",features.size())
-        # print("GEI_g_features ########",GEI_g_features)
         features = features.data.cpu()
-        features = torch.cat((features, GEI_g_features), 0)
         gf.append(features)
         g_pids.extend(pids)
         g_camids.extend(camids)
