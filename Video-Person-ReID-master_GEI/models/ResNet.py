@@ -13,14 +13,17 @@ class ResNet50TP(nn.Module):
     def __init__(self, num_classes, loss={'xent'}, **kwargs):
         super(ResNet50TP, self).__init__()
         self.loss = loss
-        resnet50 = torchvision.models.resnet50(pretrained=True)
-        self.base = nn.Sequential(*list(resnet50.children())[:-2])
         self.feat_dim = 2048
         self.feat_dim1 = 4096
+        resnet50 = torchvision.models.resnet50(pretrained=True)
+        self.base = nn.Sequential(*list(resnet50.children())[:-2])
+
+        self.BN1 =nn.BatchNorm1d(2048)
+        self.BN2 = nn.BatchNorm1d(4096)
+        self.classifier1 = nn.Linear(self.feat_dim1, num_classes)
         self.classifier = nn.Linear(self.feat_dim, num_classes)
 
     def forward(self, x,g=None):
-
         b = x.size(0)
         t = x.size(1)
         x = x.view(b*t,x.size(2), x.size(3), x.size(4))
@@ -30,11 +33,14 @@ class ResNet50TP(nn.Module):
         x=x.permute(0,2,1)
         f = F.avg_pool1d(x,t)
         f = f.view(b, self.feat_dim)
-        if not self.training:
+        if g is None:
+            y=self.classifier(f)
             return f
         else:
-            # f = torch.cat((f, g), 1)
-            y = self.classifier(f)
+            g=self.BN1(g)
+            f1 = self.BN2(torch.cat((f, g), 1))    ####combine image and energy image
+            y = self.classifier1(f1)
+
 
         if self.loss == {'xent'}:
             return y
@@ -99,7 +105,7 @@ class ResNet50TA(nn.Module):
 
 class ResNet50RNN(nn.Module):
     def __init__(self, num_classes, loss={'xent'}, **kwargs):
-        super(ResNet50r, self).__init__()
+        super(ResNet50RNN, self).__init__()
         self.loss = loss
         resnet50 = torchvision.models.resnet50(pretrained=True)
         self.base = nn.Sequential(*list(resnet50.children())[:-2])
