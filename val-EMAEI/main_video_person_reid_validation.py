@@ -13,7 +13,7 @@ import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
 from torch.optim import lr_scheduler
-from tensorboardX import  SummaryWriter
+from tensorboardX import SummaryWriter
 
 import data_manager
 from video_loader import VideoDataset
@@ -37,7 +37,7 @@ parser.add_argument('--width', type=int, default=112,
                     help="width of an image (default: 112)")
 parser.add_argument('--seq-len', type=int, default=4, help="number of images to sample in a tracklet")
 # Optimization options
-parser.add_argument('--max-epoch', default=100, type=int,
+parser.add_argument('--max-epoch', default=400, type=int,
                     help="maximum epochs to run")
 parser.add_argument('--start-epoch', default=0, type=int,
                     help="manual epoch number (useful on restarts)")
@@ -79,10 +79,15 @@ args = parser.parse_args()
 
 
 def main():
-    file_name = "result_cl_v4.5.txt"
+
+    ###datetime log ,result file ,GPU config###
+    date_time = time.asctime()
+    print(date_time)
+
+    file_name = "./result_file/May_result_fiel/result_cl_b16.txt"
     result_file = open(file_name, "w+")
     if result_file:
-        print("file exist")
+        print(file_name+"file exist")
     else:
         os.mkdir(file_name)
 
@@ -92,7 +97,7 @@ def main():
     if args.use_cpu: use_gpu = False
 
     if not args.evaluate:
-        sys.stdout = Logger(osp.join(args.save_dir, 'log_train.txt'))
+        sys.stdout = Logger(osp.join(args.save_dir, './result_file/May_result_fiel/log_result_cl_b16_v5.17.txt'))
     else:
         sys.stdout = Logger(osp.join(args.save_dir, 'log_test.txt'))
     print("==========\nArgs:{}\n==========".format(args))
@@ -163,6 +168,7 @@ def main():
     )
 
     train_all={"train":trainloader,"val":valloader}
+    print(len(train_all["val"]))
 
     queryloader = DataLoader(
         VideoDataset(dataset.query, seq_len=args.seq_len, sample='dense', transform=transform_test),
@@ -182,11 +188,9 @@ def main():
     train_GEI_all={"train":train_GEI,"val":val_GEI}
     print("finished train_GEI and val_GEI###########")
 
-
     query_GEI = load_GEI(GEI_dir, queryloader, args.test_batch,"query")
     gallery_GEI = load_GEI(GEI_dir, galleryloader, args.test_batch,"gallery")
     print("finished query_GEI and gallery_GEI###########")
-
 
 
     #####################加载模型，置置模型参数######################
@@ -218,11 +222,11 @@ def main():
     if use_gpu:
         model = nn.DataParallel(model).cuda()
 
-    if args.evaluate:
-        print("Evaluate only")
-        reslut = open("reslut.txt")
-        test(model, queryloader, galleryloader, query_GEI, gallery_GEI, args.pool, use_gpu, reslut)
-        return
+    # if args.evaluate:
+    #     print("Evaluate only")
+    #     reslut = open("reslut.txt")
+    #     test(model, queryloader, galleryloader, query_GEI, gallery_GEI, args.pool, use_gpu, reslut)
+    #     return
 
 #############训练、测试模型参数###############################
     start_time = time.time()
@@ -238,24 +242,24 @@ def main():
         writer.add_scalars("data_loss", {"train_loss": loss_train.avg, "val_loss": loss_val.avg}, epoch)
         writer.add_scalars("data_acc", {"train_acc": acc["train"], "val_acc": acc["val"]}, epoch)
 
-        # if args.stepsize > 0: scheduler.step()
-        #
-        # if args.eval_step > 0 and (epoch + 1) % args.eval_step == 0 or (epoch + 1) == args.max_epoch:
-        #     print("==> Test")
-        #     rank1 = test(model, queryloader, galleryloader, query_GEI, gallery_GEI, args.pool, use_gpu, result_file)
-        #     writer.add_scalar("data/rank1",rank1,epoch)
-        #     is_best = rank1 > best_rank1
-        #     if is_best: best_rank1 = rank1
-        #
-        #     if use_gpu:
-        #         state_dict = model.module.state_dict()
-        #     else:
-        #         state_dict = model.state_dict()
-        #     save_checkpoint({
-        #         'state_dict': state_dict,
-        #         'rank1': rank1,
-        #         'epoch': epoch,
-        #     }, is_best, osp.join(args.save_dir, 'checkpoint_ep' + str(epoch + 1) + '.pth.tar'))
+        if args.stepsize > 0: scheduler.step()
+
+        if args.eval_step > 0 and (epoch + 1) % args.eval_step == 0 or (epoch + 1) == args.max_epoch:
+            print("==> Test")
+            rank1, mAP = test(model, queryloader, galleryloader, query_GEI, gallery_GEI, args.pool, use_gpu, result_file)
+            writer.add_scalars("data/metric",{"rank1": rank1, "mAP": mAP}, epoch)
+            is_best = rank1 > best_rank1
+            if is_best: best_rank1 = rank1
+
+            if use_gpu:
+                state_dict = model.module.state_dict()
+            else:
+                state_dict = model.state_dict()
+            save_checkpoint({
+                'state_dict': state_dict,
+                'rank1': rank1,
+                'epoch': epoch,
+            }, is_best, osp.join(args.save_dir, 'checkpoint_ep' + str(epoch + 1) + '.pth.tar'))
 
     elapsed = round(time.time() - start_time)
     elapsed = str(datetime.timedelta(seconds=elapsed))
@@ -265,7 +269,6 @@ def main():
 
 def train(model, criterion_xent, criterion_htri, optimizer, trainloader, train_GEI, use_gpu):
 
-    # loss_all ={}
     losses_train = AverageMeter()
     losses_val = AverageMeter()
     acc={}
@@ -288,8 +291,10 @@ def train(model, criterion_xent, criterion_htri, optimizer, trainloader, train_G
             if phase=="val":
                 with torch.no_grad():
                     outputs, features = model(imgs, GEI_features)
+
             else:
                 outputs, features = model(imgs, GEI_features)
+
 
             if args.htri_only:
                 # only use hard triplet loss to train the network
@@ -301,26 +306,25 @@ def train(model, criterion_xent, criterion_htri, optimizer, trainloader, train_G
                 loss = xent_loss + htri_loss
 
 
-
             _,preds=torch.max(outputs.data,1)
 
             optimizer.zero_grad()
             if phase=="train":
-                print("train_loss", loss.data)
+                # print("train_loss", loss.data)
                 loss.backward()
                 optimizer.step()
                 losses_train.update(loss.data, pids.size(0))
                 # losses.update(loss.data[0] pids.size(0))
             else:
-                print("val_loss",loss.data)
+                # print("val_loss",loss.data)
                 losses_val .update(loss.data, pids.size(0))
             running_corrects += float(torch.sum(preds.data.cpu() == pids.data))
 
-        print("running_corrects:",running_corrects)
+
         acc[phase]=running_corrects/(len(trainloader[phase])*pids.size(0))
         print(phase,"######",acc[phase])
 
-    return losses_train, losses_val,acc
+    return losses_train, losses_val, acc
 
 
 def test(model, queryloader, galleryloader, query_GEI, gallery_GEI, pool, use_gpu, result_file, ranks=[1, 5, 10, 20]):
@@ -342,10 +346,10 @@ def test(model, queryloader, galleryloader, query_GEI, gallery_GEI, pool, use_gp
         assert (b == 1)
         imgs = imgs.view(b * n, s, c, h, w)
         features = model(imgs)
-        features = features.view(n, -1)
-        features = torch.mean(features, 0)
+        features = features.view(n, -1)         ####特征维数？
+        features = torch.mean(features, 0)      #####特征维数？
         features = features.data.cpu()
-        features = torch.cat((features, GEI_q_features), 0)
+        features = torch.cat((features, GEI_q_features), 0)  ####特征维数？
         qf.append(features)
         q_pids.extend(pids)
         q_camids.extend(camids)
@@ -378,8 +382,6 @@ def test(model, queryloader, galleryloader, query_GEI, gallery_GEI, pool, use_gp
         else:
             features, _ = torch.max(features, 0)
 
-        # print("features.size #########",features.size())
-        # print("GEI_g_features ########",GEI_g_features)
         features = features.data.cpu()
         features = torch.cat((features, GEI_g_features), 0)
         gf.append(features)
@@ -414,7 +416,7 @@ def test(model, queryloader, galleryloader, query_GEI, gallery_GEI, pool, use_gp
         result_file.write("Rank-{:<3}: {:.1%}".format(r, cmc[r - 1]) + "\n" + "------------------" + "\n")
     print("------------------")
 
-    return cmc[0]
+    return cmc[0],mAP
 
 
 if __name__ == '__main__':
