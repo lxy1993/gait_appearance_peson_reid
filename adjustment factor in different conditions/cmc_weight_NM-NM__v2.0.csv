@@ -1,0 +1,21 @@
+rank-1,rank-5,rank-10,rank-15,rank-20,rank-25,mAP,Weight =1
+1,1,1,1,1,1,0.7,
+1,1,1,1,1,1,0.91,
+rank-1,rank-5,rank-10,rank-15,rank-20,rank-25,mAP,Weight =0.5
+1,1,1,1,1,1,0.73,
+1,1,1,1,1,1,0.92,
+rank-1,rank-5,rank-10,rank-15,rank-20,rank-25,mAP,Weight=0.3
+1,1,1,1,1,1,0.68,
+1,1,1,1,1,1,0.84,
+rank-1,rank-5,rank-10,rank-15,rank-20,rank-25,mAP,Weight=0.7
+1,1,1,1,1,1,0.74,
+1,1,1,1,1,1,0.84,
+rank-1,rank-5,rank-10,rank-15,rank-20,rank-25,mAP,Weight=0.1
+1,1,1,1,1,1,0.82,
+1,1,1,1,1,1,0.91,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+,,,,,,,
+"备注：由于NM-NM condition 下mAP指标比较高 ,设置epoch=10，evaluated_step=5",,,,,,,

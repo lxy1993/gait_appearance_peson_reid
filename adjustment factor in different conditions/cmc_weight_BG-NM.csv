@@ -1,0 +1,15 @@
+rank-1,rank-5,rank-10,rank-15,rank-20,rank-25,mAP,Weight=0.1
+0.99,1,1,1,1,1,0.95,
+0.99,0.99,0.99,0.99,0.99,0.99,0.96,
+rank-1,rank-5,rank-10,rank-15,rank-20,rank-25,mAP,Weight=0.3
+1,1,1,1,1,1,0.96,
+1,1,1,1,1,1,0.95,
+rank-1,rank-5,rank-10,rank-15,rank-20,rank-25,mAP,Weight=0.5
+1,1,1,1,1,1,0.94,
+0.99,0.99,1,1,1,1,0.95,
+rank-1,rank-5,rank-10,rank-15,rank-20,rank-25,mAP,Weight=0.7
+0.99,1,1,1,1,1,0.95,
+1,1,1,1,1,1,0.93,
+rank-1,rank-5,rank-10,rank-15,rank-20,rank-25,mAP,Weight=1.0
+1,1,1,1,1,1,0.94,
+0.99,0.99,0.99,0.99,0.99,0.99,0.94,
